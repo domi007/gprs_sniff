@@ -1,0 +1,156 @@
+diff --git a/src/host/layer23/src/misc/app_ccch_scan.c b/src/host/layer23/src/misc/app_ccch_scan.c
+index ecf934d..5568cb7 100644
+--- a/src/host/layer23/src/misc/app_ccch_scan.c
++++ b/src/host/layer23/src/misc/app_ccch_scan.c
+@@ -209,7 +209,7 @@ static int gsm48_rx_imm_ass(struct msgb *msg, struct osmocom_ms *ms)
+ 	int rv;
+ 
+ 	/* Discard packet TBF assignement */
+-	if (ia->page_mode & 0xf0)
++	if ((ia->page_mode & 0xf0) != 0x10)
+ 		return 0;
+ 
+ 	/* If we're not ready yet, or just busy ... */
+@@ -649,7 +649,7 @@ void layer3_rx_burst(struct osmocom_ms *ms, struct msgb *msg)
+ 				app_state.dch_badcnt = 0;
+ 
+ 			/* Release condition */
+-			do_rel = app_state.dch_badcnt >= 6;
++			do_rel = app_state.dch_badcnt >= 600;
+ 		}
+ 	}
+ 
+diff --git a/src/target/firmware/include/layer1/tdma_sched.h b/src/target/firmware/include/layer1/tdma_sched.h
+index f58d59b..3a8c91a 100644
+--- a/src/target/firmware/include/layer1/tdma_sched.h
++++ b/src/target/firmware/include/layer1/tdma_sched.h
+@@ -10,8 +10,8 @@
+  * bucket contains of a list of callbacks which are executed when the bucket
+  * index reaches that particular bucket. */
+ 
+-#define TDMASCHED_NUM_FRAMES	25
+-#define TDMASCHED_NUM_CB	8
++#define TDMASCHED_NUM_FRAMES	32
++#define TDMASCHED_NUM_CB	16
+ 
+ #define TDMA_IFLG_TPU		(1<<0)
+ #define TDMA_IFLG_DSP		(1<<1)
+diff --git a/src/target/firmware/include/stdint.h b/src/target/firmware/include/stdint.h
+index 627403f..279e74f 100644
+--- a/src/target/firmware/include/stdint.h
++++ b/src/target/firmware/include/stdint.h
+@@ -16,7 +16,7 @@
+    one of the compilers producing working code right now. */
+ 
+ #if __GNUC__ > 3
+-#include_next <stdint.h>
++//#include_next <stdint.h>
+ #endif
+ 
+ #ifndef __int8_t_defined
+diff --git a/src/target/firmware/layer1/prim_sniff.c b/src/target/firmware/layer1/prim_sniff.c
+index 37dcd32..46c1d58 100644
+--- a/src/target/firmware/layer1/prim_sniff.c
++++ b/src/target/firmware/layer1/prim_sniff.c
+@@ -175,15 +175,17 @@ l1s_sniff_resp(uint8_t ul, uint8_t burst_id, uint16_t p3)
+ 	bi->frame_nr = htonl(rx_time.fn);
+ 
+ 		/* ARFCN */
+-	if (ul)
++	if (ul) {
+ 		rf_arfcn |= ARFCN_UPLINK;
++		burst_id += 3;
++	}
+ 	bi->band_arfcn = htons(rf_arfcn);
+ 
+ 		/* Set Channel Number depending on MFrame Task ID */
+-	bi->chan_nr = mframe_task2chan_nr(mf_task_id, tn);
++	bi->chan_nr = mframe_task2chan_nr(mf_task_id, (tn+burst_id)%8);
+ 
+ 		/* Set burst id */
+-	bi->flags = burst_id;
++	bi->flags = 0; //burst_id;
+ 
+ 		/* Set SACCH indication */
+ 	if (mf_task_flags & MF_F_SACCH)
+@@ -242,9 +244,9 @@ l1s_sniff_cmd(uint8_t ul, __unused uint8_t burst_id, __unused uint16_t p3)
+ 	dsp_api.db_w->d_ctrl_system |= (1 << B_BCCH_FREQ_IND);
+ 
+ 	if (ul) {
+-		l1s_rx_win_ctrl(arfcn | ARFCN_UPLINK, L1_RXWIN_NB, 3);
++		l1s_rx_win_ctrl(arfcn | ARFCN_UPLINK, L1_RXWIN_NB, burst_id);
+ 	} else {
+-		l1s_rx_win_ctrl(arfcn, L1_RXWIN_NB, 0);
++		l1s_rx_win_ctrl(arfcn, L1_RXWIN_NB, burst_id);
+ 	}
+ 
+ 	return 0;
+@@ -252,28 +254,56 @@ l1s_sniff_cmd(uint8_t ul, __unused uint8_t burst_id, __unused uint16_t p3)
+ 
+ const struct tdma_sched_item sniff_xcch_dl_sched_set[] = {
+ 						SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_END_FRAME(),
+-						SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 1),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 2),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -5, 0, 1),	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 3),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -5, 0, 2),						SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -5, 0, 3),						SCHED_END_FRAME(),
++						SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),						SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),						SCHED_END_FRAME(),
+ 	SCHED_END_SET()
+ };
+ 
+ const struct tdma_sched_item sniff_xcch_ul_sched_set[] = {
+ 						SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 0),	SCHED_END_FRAME(),
+-						SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 1),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 2),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -4, 1, 1),	SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 3),	SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -4, 1, 2),						SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -4, 1, 3),						SCHED_END_FRAME(),
++						SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),						SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),						SCHED_END_FRAME(),
+ 	SCHED_END_SET()
+ };
+ 
++/* Single slot capture */
++#if 0
+ const struct tdma_sched_item sniff_tch_sched_set[] = {
+-	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 3, 1, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 1, 0),	SCHED_END_FRAME(),
+ 											SCHED_END_FRAME(),
+-	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM(l1s_sniff_resp, -4, 1, 0),	SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM(l1s_sniff_resp, -5, 1, 0),	SCHED_END_FRAME(),
+ 	SCHED_END_SET()
+ };
++#endif
+ 
++/* Multislot capture */
++
++// Downlink
++#if 1
++const struct tdma_sched_item sniff_tch_sched_set[] = {
++	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 0, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 2, 0, 2),
++	SCHED_ITEM_DT(l1s_sniff_cmd, 4, 0, 4),	SCHED_ITEM_DT(l1s_sniff_cmd, 6, 0, 6),	SCHED_END_FRAME(),
++											SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 0, 0),	SCHED_ITEM(l1s_sniff_resp, -4, 0, 2),
++	SCHED_ITEM(l1s_sniff_resp, -3, 0, 4),	SCHED_ITEM(l1s_sniff_resp, -2, 0, 6),	SCHED_END_FRAME(),
++	SCHED_END_SET()
++};
++
++#else
++
++// Uplink
++const struct tdma_sched_item sniff_tch_sched_set[] = {
++	SCHED_ITEM_DT(l1s_sniff_cmd, 0, 1, 0),	SCHED_ITEM_DT(l1s_sniff_cmd, 2, 1, 2),
++	SCHED_ITEM_DT(l1s_sniff_cmd, 4, 1, 4),	SCHED_ITEM_DT(l1s_sniff_cmd, 6, 1, 6),	SCHED_END_FRAME(),
++											SCHED_END_FRAME(),
++	SCHED_ITEM(l1s_sniff_resp, -5, 1, 0),	SCHED_ITEM(l1s_sniff_resp, -4, 1, 2),
++	SCHED_ITEM(l1s_sniff_resp, -3, 1, 4),	SCHED_ITEM(l1s_sniff_resp, -2, 1, 6),	SCHED_END_FRAME(),
++	SCHED_END_SET()
++};
++#endif
