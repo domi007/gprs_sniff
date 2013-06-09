@@ -6,8 +6,8 @@ presentation and tutorial:
 
 https://srlabs.de/gprs
 
-It currently contains an updated version of the patch needed to enable GPRS-sniffing with OsmocomBB.
-This patch works with the latest burst_ind branch of Sylvain Munaut.
+It currently contains:
+- an updated version of the patch needed to enable GPRS-sniffing with OsmocomBB. This patch works with the latest burst_ind branch of Sylvain Munaut.
 
 
 Credits and everything goes to the great people behind the tutorial and the Osmocom project, thank you!
